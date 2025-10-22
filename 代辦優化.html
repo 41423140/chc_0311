@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>待辦事項清單 (含通知功能) - Brython</title>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.10.5/brython.min.js"></script>
+  <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.10.5/brython_stdlib.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background: linear-gradient(to right, #e0ecf7, #f5f7fa);
+      margin: 0;
+      padding: 2em 1em;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+      color: #2c3e50;
+    }
+
+    .container {
+      max-width: 900px;
+      width: 100%;
+      background: white;
+      padding: 2.5em 3em;
+      border-radius: 16px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+
+    h2 {
+      text-align: center;
+      font-weight: 700;
+      margin-bottom: 2em;
+      font-size: 1.8em;
+    }
+
+    .input-area {
+      display: flex;
+      gap: 1em;
+      align-items: flex-end;
+      margin-bottom: 2em;
+      flex-wrap: wrap;
+    }
+
+    .inputs {
+      flex: 1;
+      display: flex;
+      gap: 1em;
+      flex-wrap: wrap;
+    }
+
+    input[type="text"],
+    input[type="datetime-local"] {
+      flex: 1;
+      padding: 0.8em 1em;
+      font-size: 1.1em;
+      border: 1.5px solid #d1d9e6;
+      border-radius: 10px;
+      transition: 0.3s ease;
+    }
+
+    input[type="text"]:focus,
+    input[type="datetime-local"]:focus {
+      border-color: #3498db;
+      box-shadow: 0 0 10px rgba(52, 152, 219, 0.3);
+      outline: none;
+    }
+
+    button#add_btn {
+      background-color: #3498db;
+      border: none;
+      color: white;
+      font-size: 1.1em;
+      font-weight: 700;
+      padding: 0.8em 1.2em;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: 0.3s ease;
+      box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+    }
+
+    button#add_btn:hover {
+      background-color: #2980b9;
+    }
+
+    ul#task_list {
+      list-style: none;
+      padding: 0;
+      max-height: 450px;
+      overflow-y: auto;
+    }
+
+    li {
+      background: #f0f4f8;
+      border-left: 6px solid #dcdfe3;
+      padding: 1em 1.5em;
+      border-radius: 14px;
+      margin-bottom: 1em;
+      position: relative;
+      transition: background-color 0.3s ease, transform 0.2s;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+    }
+
+    li:hover {
+      background-color: #e3f2fd;
+      transform: translateY(-2px);
+    }
+
+    li.today-task {
+      border-left: 6px solid #3498db;
+      background-color: #d6eaf8 !important;
+    }
+
+    .task-title {
+      font-weight: 700;
+      font-size: 1.2em;
+      margin-bottom: 0.3em;
+    }
+
+    .task-info {
+      font-size: 0.9em;
+      color: #555;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5em;
+    }
+
+    .task-info span {
+      background: #ecf0f1;
+      padding: 0.2em 0.6em;
+      border-radius: 6px;
+    }
+
+    button.delete-btn {
+      position: absolute;
+      top: 1em;
+      right: 1em;
+      background: #e74c3c;
+      color: white;
+      border: none;
+      padding: 0.5em 0.8em;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button.delete-btn:hover {
+      background: #c0392b;
+    }
+
+    @media (max-width: 600px) {
+      .input-area {
+        flex-direction: column;
+        gap: 1em;
+      }
+      .inputs {
+        flex-direction: column;
+        gap: 1em;
+      }
+      button#add_btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+
+<body onload="brython()">
+  <div class="container">
+    <h2>📋 我的待辦事項清單</h2>
+
+    <div class="input-area">
+      <div class="inputs">
+        <input id="task_input" type="text" placeholder="輸入任務名稱 📝" autocomplete="off" />
+        <input id="datetime_input" type="datetime-local" />
+        <input id="location_input" type="text" placeholder="輸入地點 📍" autocomplete="off" />
+      </div>
+      <button id="add_btn">➕ 新增任務</button>
+    </div>
+
+    <ul id="task_list"></ul>
+  </div>
+
+  <script type="text/python">
+    import json
+    from browser import document, alert, window
+    from browser.timer import set_interval
+    from datetime import datetime, date
+
+    STORAGE_KEY = 'brython_todo_list'
+    notified_tasks = set()
+
+    def save_tasks(tasks):
+        window.localStorage.setItem(STORAGE_KEY, json.dumps(tasks))
+
+    def load_tasks():
+        data = window.localStorage.getItem(STORAGE_KEY)
+        if data:
+            try:
+                return json.loads(data)
+            except:
+                return []
+        return []
+
+    def render_task(task, index):
+        li = document.createElement('li')
+
+        is_today = False
+        dt_str = task.get('datetime')
+        if dt_str:
+            try:
+                dt_date = datetime.strptime(dt_str[:10], '%Y-%m-%d').date()
+                if dt_date == date.today():
+                    is_today = True
+            except:
+                pass
+
+        if is_today:
+            li.classList.add('today-task')
+
+        title = document.createElement('div')
+        title.className = 'task-title'
+        title.textContent = "🗂 " + task['title']
+        li <= title
+
+        info = document.createElement('div')
+        info.className = 'task-info'
+
+        if dt_str:
+            dt_display = dt_str.replace('T', ' ')
+            span_time = document.createElement('span')
+            span_time.textContent = f"🕒 {dt_display}"
+            info <= span_time
+
+        if task.get('location'):
+            span_loc = document.createElement('span')
+            span_loc.textContent = f"📍 {task['location']}"
+            info <= span_loc
+
+        li <= info
+
+        del_btn = document.createElement('button')
+        del_btn.textContent = '🗑 刪除'
+        del_btn.className = 'delete-btn'
+
+        def delete_task(ev):
+            tasks = load_tasks()
+            if 0 <= index < len(tasks):
+                tasks.pop(index)
+                save_tasks(tasks)
+                refresh_tasks()
+
+        del_btn.bind('click', delete_task)
+        li <= del_btn
+
+        return li
+
+    def notify_today_tasks(count):
+        if not hasattr(window, 'Notification'):
+            return
+
+        def show_notification():
+            title = "📌 今日提醒"
+            body = f"你今天有 {count} 項任務要完成喔！"
+            options = {"body": body}
+            window.Notification.new(title, options)
+
+        if window.Notification.permission == "granted":
+            show_notification()
+        elif window.Notification.permission != "denied":
+            def permission_callback(permission):
+                if permission == "granted":
+                    show_notification()
+            window.Notification.requestPermission().then(permission_callback)
+
+    def show_task_notification(task):
+        if not hasattr(window, 'Notification'):
+            return
+
+        def display():
+            title = "⏰ 任務時間到了！"
+            body = f"{task['title']}\n時間：{task.get('datetime', '')}\n地點：{task.get('location', '')}"
+            window.Notification.new(title, {"body": body})
+
+        if window.Notification.permission == "granted":
+            display()
+        elif window.Notification.permission != "denied":
+            def permission_callback(p):
+                if p == "granted":
+                    display()
+            window.Notification.requestPermission().then(permission_callback)
+
+    def check_upcoming_tasks():
+        now = datetime.now()
+        tasks = load_tasks()
+
+        for task in tasks:
+            dt_str = task.get('datetime')
+            if not dt_str:
+                continue
+            try:
+                task_time = datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
+                diff = abs((task_time - now).total_seconds())
+                identifier = f"{task['title']}_{dt_str}"
+                if diff < 60 and identifier not in notified_tasks:
+                    show_task_notification(task)
+                    notified_tasks.add(identifier)
+            except:
+                continue
+
+    def refresh_tasks():
+        task_list = document['task_list']
+        task_list.clear()
+        tasks = load_tasks()
+
+        def sort_key(t):
+            dt_str = t.get('datetime')
+            if dt_str:
+                try:
+                    return datetime.strptime(dt_str, '%Y-%m-%dT%H:%M')
+                except:
+                    return datetime.max
+            return datetime.max
+
+        tasks_sorted = sorted(tasks, key=sort_key)
+        for i, task in enumerate(tasks_sorted):
+            li = render_task(task, i)
+            task_list <= li
+
+        today_count = sum(1 for t in tasks_sorted if t.get('datetime', '').startswith(date.today().strftime('%Y-%m-%d')))
+        if today_count > 0:
+            notify_today_tasks(today_count)
+
+    def add_task(ev):
+        title = document['task_input'].value.strip()
+        datetime_val = document['datetime_input'].value.strip()
+        location = document['location_input'].value.strip()
+
+        if not title:
+            alert("任務名稱不能為空")
+            return
+
+        tasks = load_tasks()
+        tasks.append({
+            'title': title,
+            'datetime': datetime_val,
+            'location': location
+        })
+        save_tasks(tasks)
+
+        document['task_input'].value = ''
+        document['datetime_input'].value = ''
+        document['location_input'].value = ''
+
+        refresh_tasks()
+
+    document['add_btn'].bind('click', add_task)
+
+    def enter_key(ev):
+        if ev.keyCode == 13:
+            add_task(ev)
+
+    document['task_input'].bind('keydown', enter_key)
+    document['datetime_input'].bind('keydown', enter_key)
+    document['location_input'].bind('keydown', enter_key)
+
+    refresh_tasks()
+    set_interval(check_upcoming_tasks, 60_000)  # 每分鐘檢查
+  </script>
+</body>
+</html>
