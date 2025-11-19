@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>點擊方塊遊戲</title>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython_stdlib.js"></script>
+    <style>
+        canvas {
+            border: 2px solid black;
+            background-color: #f0f0f0;
+        }
+        #info {
+            font-size: 18px;
+            margin: 10px 0;
+            font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+        }
+    </style>
+</head>
+<body onload="brython()">
+    <h1 style="font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;">點擊紅色方塊！</h1>
+    <div id="info">分數：<span id="score">0</span>｜剩餘時間：<span id="time">30</span> 秒</div>
+    <canvas id="game" width="400" height="400"></canvas>
+
+    <script type="text/python">
+        from browser import document, timer
+        import random
+
+        canvas = document["game"]
+        ctx = canvas.getContext("2d")
+
+        # 字型設定
+        ctx.font = "20px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif"
+
+        score = 0
+        time_left = 30
+        box_size = 40
+        box_x = random.randint(0, canvas.width - box_size)
+        box_y = random.randint(0, canvas.height - box_size)
+
+        def draw_box():
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+            ctx.fillStyle = "red"
+            ctx.fillRect(box_x, box_y, box_size, box_size)
+
+        def update_score():
+            document["score"].text = str(score)
+
+        def update_time():
+            document["time"].text = str(time_left)
+
+        def move_box():
+            global box_x, box_y
+            box_x = random.randint(0, canvas.width - box_size)
+            box_y = random.randint(0, canvas.height - box_size)
+            draw_box()
+
+        def on_click(evt):
+            global score
+            x = evt.offsetX
+            y = evt.offsetY
+            if box_x <= x <= box_x + box_size and box_y <= y <= box_y + box_size:
+                score += 1
+                update_score()
+                move_box()
+
+        def countdown():
+            global time_left
+            time_left -= 1
+            update_time()
+            if time_left <= 0:
+                timer.clear_interval(count_timer)
+                canvas.unbind("click", on_click)
+                ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+                # 結束畫面文字
+                ctx.fillStyle = "black"
+                ctx.font = "24px 'Noto Sans TC', 'Microsoft JhengHei', sans-serif"
+                ctx.textAlign = "center"
+                ctx.textBaseline = "middle"
+                ctx.fillText(f"遊戲結束！得分：{score}", canvas.width // 2, canvas.height // 2)
+
+        canvas.bind("click", on_click)
+        draw_box()
+        update_score()
+        update_time()
+        count_timer = timer.set_interval(countdown, 1000)
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>躲避球挑戰</title>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython.min.js"></script>
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython_stdlib.js"></script>
+    <style>
+        canvas {
+            border: 2px solid black;
+            background-color: #eee;
+        }
+        body {
+            font-family: 'Noto Sans TC', 'Microsoft JhengHei', sans-serif;
+        }
+        #restart {
+            display: none;
+            margin-top: 10px;
+            font-size: 18px;
+            padding: 6px 12px;
+        }
+    </style>
+</head>
+<body onload="brython()">
+    <h1>🏃 躲避球挑戰</h1>
+    <p>用滑鼠移動綠色球，避開紅色球。看看你能撐多久！</p>
+    <div>存活時間：<span id="score">0</span> 秒</div>
+    <canvas id="game" width="400" height="400"></canvas>
+    <br>
+    <button id="restart">重新開始</button>
+
+    <script type="text/python">
+        from browser import document, timer
+        import random, time
+
+        canvas = document["game"]
+        ctx = canvas.getContext("2d")
+        restart_btn = document["restart"]
+
+        # 全域遊戲變數
+        player_radius = 10
+        ball_radius = 10
+        ball_speed = 3
+        update_interval = 30
+        add_ball_interval = 1000
+
+        def init_game():
+            global player_x, player_y, balls, is_running, start_time
+            player_x, player_y = canvas.width // 2, canvas.height // 2
+            balls = []
+            is_running = True
+            start_time = time.time()
+            document["score"].text = "0"
+            restart_btn.style.display = "none"
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+        def draw_player():
+            ctx.beginPath()
+            ctx.arc(player_x, player_y, player_radius, 0, 2 * 3.14)
+            ctx.fillStyle = "green"
+            ctx.fill()
+            ctx.closePath()
+
+        def draw_ball(ball):
+            ctx.beginPath()
+            ctx.arc(ball["x"], ball["y"], ball_radius, 0, 2 * 3.14)
+            ctx.fillStyle = "red"
+            ctx.fill()
+            ctx.closePath()
+
+        def update_game():
+            if not is_running:
+                return
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+            for ball in balls:
+                ball["y"] += ball_speed
+                draw_ball(ball)
+
+                dx = ball["x"] - player_x
+                dy = ball["y"] - player_y
+                distance = (dx**2 + dy**2)**0.5
+                if distance < ball_radius + player_radius:
+                    end_game()
+                    return
+
+            draw_player()
+
+            while balls and balls[0]["y"] > canvas.height + ball_radius:
+                balls.pop(0)
+
+            elapsed = int(time.time() - start_time)
+            document["score"].text = str(elapsed)
+
+        def add_ball():
+            if is_running:
+                new_ball = {
+                    "x": random.randint(ball_radius, canvas.width - ball_radius),
+                    "y": -ball_radius
+                }
+                balls.append(new_ball)
+
+        def end_game():
+            global is_running
+            is_running = False
+            ctx.fillStyle = "black"
+            ctx.font = "24px sans-serif"
+            ctx.textAlign = "center"
+            ctx.textBaseline = "middle"
+            ctx.fillText(f"遊戲結束！你撐了 {document['score'].text} 秒", canvas.width // 2, canvas.height // 2)
+            restart_btn.style.display = "inline-block"
+
+        def on_mouse_move(evt):
+            global player_x, player_y
+            rect = canvas.getBoundingClientRect()
+            player_x = evt.clientX - rect.left
+            player_y = evt.clientY - rect.top
+
+        def restart(evt):
+            init_game()
+
+        # 綁定事件
+        canvas.bind("mousemove", on_mouse_move)
+        restart_btn.bind("click", restart)
+
+        # 設定遊戲更新計時器
+        timer.set_interval(update_game, update_interval)
+        timer.set_interval(add_ball, add_ball_interval)
+
+        # 初始啟動
+        init_game()
+    </script>
+</body>
+</html>
+
+
+
