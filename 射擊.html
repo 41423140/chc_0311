@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>鍵盤移動+滑鼠射擊遊戲 (Brython)</title>
+<script src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/brython@3.11.0/brython_stdlib.js"></script>
+<style>
+    body {
+        font-family: 'Microsoft JhengHei', sans-serif;
+        background: #222;
+        color: #eee;
+        text-align: center;
+        user-select: none;
+    }
+    canvas {
+        background: #111;
+        border: 2px solid #eee;
+        display: block;
+        margin: 0 auto;
+        cursor: crosshair;
+    }
+    #info {
+        margin-top: 10px;
+        font-size: 18px;
+        letter-spacing: 1.5px;
+    }
+    #restart {
+        display: none;
+        margin-top: 12px;
+        padding: 8px 18px;
+        font-size: 18px;
+        background: #28a745;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        user-select: none;
+    }
+    #restart:hover {
+        background: #218838;
+    }
+</style>
+</head>
+<body onload="brython()">
+    <h1>鍵盤移動 + 滑鼠射擊遊戲</h1>
+    <p>WSAD鍵移動，滑鼠指向射擊方向，按住左鍵連發子彈</p>
+    <canvas id="game" width="600" height="450"></canvas>
+    <div id="info">分數: 0 | 等級: 1 | 血量: 100</div>
+    <button id="restart">重新開始</button>
+
+<script type="text/python">
+from browser import document, timer
+import random, math, time
+
+canvas = document["game"]
+ctx = canvas.getContext("2d")
+restart_btn = document["restart"]
+info = document["info"]
+
+W, H = canvas.width, canvas.height
+
+player = {
+    "x": W//2, "y": H//2,
+    "r": 15,
+    "speed": 6,
+    "hp": 100,
+    "max_hp": 100,
+    "level": 1,
+    "score": 0,
+    "shoot_cooldown": 0.15,
+    "last_shot_time": 0,
+    "bullet_power": 1,
+    "speed_buff_time": 0,
+    "dx": 0,
+    "dy": -1  # 初始射擊方向向上
+}
+
+bullets = []
+enemies = []
+items = []
+
+bullet_speed = 10
+enemy_speed_base = 1.5
+
+is_running = True
+mouse_pos = {"x": player["x"], "y": player["y"]}
+mouse_down = False
+
+last_enemy_spawn = 0
+enemy_spawn_interval = 1400
+last_item_spawn = 0
+item_spawn_interval = 8000
+
+kill_to_levelup = 5
+
+# 紀錄鍵盤按鍵狀態
+keys_pressed = {"w": False, "a": False, "s": False, "d": False}
+
+def distance(a, b):
+    return math.sqrt((a["x"]-b["x"])**2 + (a["y"]-b["y"])**2)
+
+def draw_circle(x, y, r, color):
+    ctx.beginPath()
+    ctx.arc(x, y, r, 0, 2*math.pi)
+    ctx.fillStyle = color
+    ctx.fill()
+    ctx.closePath()
+
+def draw_text(text, x, y, color="white", size=20, center=True):
+    ctx.fillStyle = color
+    ctx.font = f"{size}px monospace"
+    if center:
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+    else:
+        ctx.textAlign = "left"
+        ctx.textBaseline = "top"
+    ctx.fillText(text, x, y)
+
+def spawn_enemy():
+    etype = random.choice(["chaser", "linear", "bouncer"])
+    ex = random.randint(20, W-20)
+    ey = -20
+    enemy = {
+        "type": etype,
+        "x": ex,
+        "y": ey,
+        "r": 15,
+        "hp": 2 + player["level"]//2,
+        "speed": enemy_speed_base + player["level"]*0.2,
+        "vx": 0,
+        "vy": 0,
+    }
+    if etype == "chaser":
+        enemy["vx"] = 0
+        enemy["vy"] = 0
+    elif etype == "linear":
+        enemy["vx"] = random.uniform(-1, 1)
+        enemy["vy"] = enemy["speed"]
+    elif etype == "bouncer":
+        enemy["vx"] = random.uniform(-2, 2)
+        enemy["vy"] = enemy["speed"] * 0.7
+
+    enemies.append(enemy)
+
+def spawn_item():
+    kind = random.choice(["heal", "speed"])
+    item = {
+        "x": random.randint(15, W-15),
+        "y": -15,
+        "r": 10,
+        "type": kind,
+        "vy": 2,
+        "duration": 5000
+    }
+    items.append(item)
+
+def update_player():
+    dx = 0
+    dy = 0
+    if keys_pressed["w"]:
+        dy -= 1
+    if keys_pressed["s"]:
+        dy += 1
+    if keys_pressed["a"]:
+        dx -= 1
+    if keys_pressed["d"]:
+        dx += 1
+
+    dist = math.sqrt(dx*dx + dy*dy)
+    if dist > 0:
+        dx /= dist
+        dy /= dist
+        current_speed = player["speed"] * (1.8 if player["speed_buff_time"] > time.time()*1000 else 1)
+        player["x"] += dx * current_speed
+        player["y"] += dy * current_speed
+
+    player["x"] = max(player["r"], min(W - player["r"], player["x"]))
+    player["y"] = max(player["r"], min(H - player["r"], player["y"]))
+
+    # 計算射擊方向 (滑鼠相對玩家向量)
+    mx, my = mouse_pos["x"], mouse_pos["y"]
+    pdx = mx - player["x"]
+    pdy = my - player["y"]
+    pdist = math.sqrt(pdx*pdx + pdy*pdy)
+    if pdist > 0:
+        player["dx"] = pdx / pdist
+        player["dy"] = pdy / pdist
+    else:
+        player["dx"] = 0
+        player["dy"] = -1
+
+def update_bullets():
+    for b in bullets[:]:
+        b["x"] += b["vx"]
+        b["y"] += b["vy"]
+        if b["x"] < 0 or b["x"] > W or b["y"] < 0 or b["y"] > H:
+            bullets.remove(b)
+
+def update_enemies():
+    for e in enemies[:]:
+        if e["type"] == "chaser":
+            dx = player["x"] - e["x"]
+            dy = player["y"] - e["y"]
+            dist = math.sqrt(dx*dx + dy*dy)
+            if dist != 0:
+                e["vx"] = dx / dist * e["speed"]
+                e["vy"] = dy / dist * e["speed"]
+            e["x"] += e["vx"]
+            e["y"] += e["vy"]
+        elif e["type"] == "linear":
+            e["x"] += e["vx"]
+            e["y"] += e["vy"]
+            if e["x"] <= e["r"] or e["x"] >= W - e["r"]:
+                e["vx"] *= -1
+        elif e["type"] == "bouncer":
+            e["x"] += e["vx"]
+            e["y"] += e["vy"]
+            if e["x"] <= e["r"] or e["x"] >= W - e["r"]:
+                e["vx"] *= -1
+            if e["y"] <= e["r"] or e["y"] >= H - e["r"]:
+                e["vy"] *= -1
+        if e["y"] > H + e["r"]:
+            enemies.remove(e)
+
+def check_collisions():
+    global is_running
+
+    for b in bullets[:]:
+        for e in enemies[:]:
+            if distance(b, e) < b["r"] + e["r"]:
+                e["hp"] -= player["bullet_power"]
+                if e["hp"] <= 0:
+                    enemies.remove(e)
+                    player["score"] += 1
+                    if player["score"] % kill_to_levelup == 0:
+                        level_up()
+                if b in bullets:
+                    bullets.remove(b)
+                break
+
+    for e in enemies[:]:
+        if distance(player, e) < player["r"] + e["r"]:
+            player["hp"] -= 15
+            enemies.remove(e)
+            if player["hp"] <= 0:
+                is_running = False
+
+    for it in items[:]:
+        if distance(player, it) < player["r"] + it["r"]:
+            if it["type"] == "heal":
+                player["hp"] = min(player["max_hp"], player["hp"] + 30)
+            elif it["type"] == "speed":
+                player["speed_buff_time"] = time.time() * 1000 + it["duration"]
+            items.remove(it)
+
+def level_up():
+    player["level"] += 1
+    player["r"] += 2
+    player["bullet_power"] += 1
+    player["max_hp"] += 10
+    player["hp"] = player["max_hp"]
+    player["speed"] += 0.3
+
+def shoot():
+    now = time.time()
+    if now - player["last_shot_time"] < player["shoot_cooldown"]:
+        return
+    player["last_shot_time"] = now
+    vx = player["dx"] * bullet_speed
+    vy = player["dy"] * bullet_speed
+    bullets.append({"x": player["x"], "y": player["y"], "vx": vx, "vy": vy, "r": 5})
+
+def update_items():
+    for it in items[:]:
+        it["y"] += it["vy"]
+        if it["y"] > H + it["r"]:
+            items.remove(it)
+
+def draw_all():
+    ctx.clearRect(0, 0, W, H)
+
+    # 道具
+    for it in items:
+        color = "lime" if it["type"] == "speed" else "pink"
+        draw_circle(it["x"], it["y"], it["r"], color)
+
+    # 子彈
+    for b in bullets:
+        draw_circle(b["x"], b["y"], b["r"], "yellow")
+
+    # 敵人
+    for e in enemies:
+        if e["type"] == "chaser":
+            color = "#ff4444"
+        elif e["type"] == "linear":
+            color = "#ff9933"
+        else:
+            color = "#cc44ff"
+        draw_circle(e["x"], e["y"], e["r"], color)
+        # 簡易血條
+        hp_ratio = e["hp"] / (2 + player["level"]//2)
+        ctx.fillStyle = "red"
+        ctx.fillRect(e["x"]-e["r"], e["y"]-e["r"]-8, e["r"]*2*hp_ratio, 4)
+
+    # 玩家
+    draw_circle(player["x"], player["y"], player["r"], "lime")
+    # 玩家血條
+    ctx.fillStyle = "red"
+    ctx.fillRect(player["x"]-player["r"], player["y"]-player["r"]-10, player["r"]*2 * (player["hp"]/player["max_hp"]), 6)
+    # 玩家方向箭頭
+    ctx.beginPath()
+    ctx.moveTo(player["x"], player["y"])
+    ctx.lineTo(player["x"] + player["dx"]*player["r"]*1.5, player["y"] + player["dy"]*player["r"]*1.5)
+    ctx.strokeStyle = "white"
+    ctx.lineWidth = 3
+    ctx.stroke()
+    ctx.closePath()
+
+    # 顯示資訊
+    info.text = f"分數: {player['score']} | 等級: {player['level']} | 血量: {int(player['hp'])}"
+
+def game_loop():
+    global last_enemy_spawn, last_item_spawn
+
+    if not is_running:
+        ctx.fillStyle = "rgba(0,0,0,0.7)"
+        ctx.fillRect(0, 0, W, H)
+        draw_text("遊戲結束！點擊重新開始", W/2, H/2, "white", 32)
+        restart_btn.style.display = "inline-block"
+        return
+
+    update_player()
+    update_bullets()
+    update_enemies()
+    update_items()
+
+    if mouse_down:
+        shoot()
+
+    check_collisions()
+
+    now_ms = time.time() * 1000
+    if now_ms - last_enemy_spawn > enemy_spawn_interval:
+        spawn_enemy()
+        last_enemy_spawn = now_ms
+
+    if now_ms - last_item_spawn > item_spawn_interval:
+        spawn_item()
+        last_item_spawn = now_ms
+
+    draw_all()
+
+def on_key_down(ev):
+    k = ev.key.lower()
+    if k in keys_pressed:
+        keys_pressed[k] = True
+
+def on_key_up(ev):
+    k = ev.key.lower()
+    if k in keys_pressed:
+        keys_pressed[k] = False
+
+def on_mouse_move(ev):
+    mouse_pos["x"] = ev.offsetX
+    mouse_pos["y"] = ev.offsetY
+
+def on_mouse_down(ev):
+    global mouse_down
+    if ev.button == 0:
+        mouse_down = True
+
+def on_mouse_up(ev):
+    global mouse_down
+    if ev.button == 0:
+        mouse_down = False
+
+def on_restart(ev):
+    global is_running, bullets, enemies, items, last_enemy_spawn, last_item_spawn
+    player["x"], player["y"] = W//2, H//2
+    player["r"] = 15
+    player["speed"] = 6
+    player["hp"] = player["max_hp"] = 100
+    player["level"] = 1
+    player["score"] = 0
+    player["bullet_power"] = 1
+    player["speed_buff_time"] = 0
+    player["dx"] = 0
+    player["dy"] = -1
+    bullets.clear()
+    enemies.clear()
+    items.clear()
+    last_enemy_spawn = 0
+    last_item_spawn = 0
+    is_running = True
+    restart_btn.style.display = "none"
+
+document.bind("keydown", on_key_down)
+document.bind("keyup", on_key_up)
+canvas.bind("mousemove", on_mouse_move)
+canvas.bind("mousedown", on_mouse_down)
+canvas.bind("mouseup", on_mouse_up)
+restart_btn.bind("click", on_restart)
+
+timer.set_interval(game_loop, 16)  # 約60FPS
+
+</script>
+</body>
+</html>
+
+
+
+
